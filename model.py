@@ -241,15 +241,46 @@ class GPT(nn.Module):
     @torch.no_grad()
     def generate_with_top_p(self, idx, max_new_tokens, temperature=1.0, top_p=0.9):
         """
-        Generate text using top-k and/or top-p (nucleus) sampling.
-
+        Generate text using top-p (nucleus) sampling.
+    
         Args:
             idx: Tensor of shape (B, T)
             max_new_tokens: number of tokens to generate
             temperature: sampling temperature
-            top_k: top-k filtering (int)
             top_p: top-p (nucleus) sampling (float, in [0, 1])
         """
-        pass
-        # TODO: Implement text generation with top-p (nucleus) sampling.
-        # top_p: top-p (nucleus) sampling (float, in [0, 1])
+        for _ in range(max_new_tokens):
+            # 如果序列长度超过 block_size，则裁剪上下文
+            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
+            # 前向传播获取 logits
+            logits, _ = self(idx_cond)
+            # 获取最后一个时间步的 logits，并根据 temperature 缩放
+            logits = logits[:, -1, :] / temperature
+            # 计算概率分布
+            probs = F.softmax(logits, dim=-1)
+    
+            # 对概率进行排序，并获取排序后的索引
+            sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+            # 计算累积概率
+            cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+    
+            # 找到累积概率超过 top_p 的位置
+            cutoff_mask = cumulative_probs > top_p
+            # 确保至少保留一个 token
+            cutoff_mask[..., 1:] = cutoff_mask[..., :-1].clone()
+            cutoff_mask[..., 0] = 0
+    
+            # 将超过 top_p 的概率置为 0
+            sorted_probs[cutoff_mask] = 0.0
+            # 重新归一化概率分布
+            sorted_probs = sorted_probs / sorted_probs.sum(dim=-1, keepdim=True)
+    
+            # 根据重新归一化的概率分布采样
+            idx_next = torch.multinomial(sorted_probs, num_samples=1)
+            # 将采样的索引映射回原始词表
+            idx_next = sorted_indices.gather(-1, idx_next)
+    
+            # 将采样的 token 添加到序列中
+            idx = torch.cat((idx, idx_next), dim=1)
+    
+        return idx

@@ -8,7 +8,8 @@ from datetime import datetime  # 用于生成日志文件名
 import numpy as np
 import torch
 
-from model import ModelConfig, GPT
+# from model import ModelConfig, GPT
+from model_RoPE import ModelConfig, GPT
 
 # ----------------------------- Configuration ----------------------------------
 # 配置部分，定义了训练的超参数和系统设置
