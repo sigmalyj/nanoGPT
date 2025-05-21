@@ -21,15 +21,92 @@ class ModelConfig:
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        # TODO: Implement the CausalSelfAttention class with RoPE positional Embedding
-        # Attributes that could possibly be used: config.n_embd, config.n_head, config.dropout, config.bias
-        
+        # 确定每个头的维度大小
+        self.n_head = config.n_head
+        self.head_dim = config.n_embd // config.n_head
+        assert config.n_embd % config.n_head == 0, "Embedding size must be divisible by the number of heads"
+
+        # Q, K, V 的线性映射
+        self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.k_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.v_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
+        # 输出的线性映射
+        self.out_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
+        # Dropout
+        self.attn_dropout = nn.Dropout(config.dropout)
+        self.resid_dropout = nn.Dropout(config.dropout)
+
+        # 缓存的 causal mask
+        self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
+                                      .view(1, 1, config.block_size, config.block_size))
+
+        # 预计算 RoPE 的旋转角度
+        self.register_buffer("theta", self._compute_theta(self.head_dim))
+
+    def _compute_theta(self, dim):
+        """
+        计算 RoPE 的旋转角度 θ_i = 1 / 10000^(2i/d)
+        """
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
+        return inv_freq
+
+    def _apply_rope(self, x, seq_len):
+        """
+        对输入 x 应用 RoPE 编码
+        x: (B, n_head, L, head_dim)
+        seq_len: 序列长度 L
+        """
+        # 生成位置索引
+        position = torch.arange(seq_len, device=x.device).unsqueeze(1)  # (L, 1)
+        # 计算旋转角度
+        angle = position * self.theta  # (L, head_dim/2)
+        # 构造旋转矩阵
+        sin, cos = angle.sin(), angle.cos()  # (L, head_dim/2)
+        sin, cos = sin.repeat(1, 2), cos.repeat(1, 2)  # (L, head_dim)
+        # 应用旋转
+        x_rotated = x * cos.unsqueeze(0).unsqueeze(0) + torch.cat([-x[..., 1::2], x[..., ::2]], dim=-1) * sin.unsqueeze(0).unsqueeze(0)
+        return x_rotated
 
     def forward(self, x):
-        # shape of x: B, L, C
-        # shape of output: B, L, C
-        # TODO: Implement the CausalSelfAttention class
+        B, L, C = x.size()  # B: batch size, L: sequence length, C: embedding size
 
+        # 计算 Q, K, V
+        Q = self.q_proj(x)  # (B, L, C)
+        K = self.k_proj(x)  # (B, L, C)
+        V = self.v_proj(x)  # (B, L, C)
+
+        # 重构为多头形式
+        Q = Q.view(B, L, self.n_head, self.head_dim).transpose(1, 2)  # (B, n_head, L, head_dim)
+        K = K.view(B, L, self.n_head, self.head_dim).transpose(1, 2)  # (B, n_head, L, head_dim)
+        V = V.view(B, L, self.n_head, self.head_dim).transpose(1, 2)  # (B, n_head, L, head_dim)
+
+        # 应用 RoPE 编码到 Q 和 K
+        Q = self._apply_rope(Q, L)
+        K = self._apply_rope(K, L)
+
+        # 计算注意力得分
+        attn_scores = (Q @ K.transpose(-2, -1)) / math.sqrt(self.head_dim)  # (B, n_head, L, L)
+
+        # 应用 causal mask，屏蔽未来的信息
+        attn_scores = attn_scores.masked_fill(self.mask[:, :, :L, :L] == 0, float('-inf'))
+
+        # 归一化注意力得分
+        attn_probs = F.softmax(attn_scores, dim=-1)  # (B, n_head, L, L)
+        attn_probs = self.attn_dropout(attn_probs)  # 应用 dropout
+
+        # 计算注意力输出
+        attn_output = attn_probs @ V  # (B, n_head, L, head_dim)
+
+        # 合并多头
+        attn_output = attn_output.transpose(1, 2).contiguous().view(B, L, C)  # (B, L, C)
+
+        # 输出线性映射并应用 dropout
+        output = self.out_proj(attn_output)  # (B, L, C)
+        output = self.resid_dropout(output)
+
+        return output
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
