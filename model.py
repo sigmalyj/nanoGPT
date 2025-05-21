@@ -21,14 +21,61 @@ class ModelConfig:
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        # TODO: Implement the CausalSelfAttention class
-        # Attributes that could possibly be used: config.n_embd, config.n_head, config.dropout, config.bias
-        
+        # 确定每个头的维度大小
+        self.n_head = config.n_head
+        self.head_dim = config.n_embd // config.n_head
+        assert config.n_embd % config.n_head == 0, "Embedding size must be divisible by the number of heads"
+
+        # Q, K, V 的线性映射
+        self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.k_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.v_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
+        # 输出的线性映射
+        self.out_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+
+        # Dropout
+        self.attn_dropout = nn.Dropout(config.dropout)
+        self.resid_dropout = nn.Dropout(config.dropout)
+
+        # 缓存的 causal mask
+        self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
+                                      .view(1, 1, config.block_size, config.block_size))
 
     def forward(self, x):
-        # shape of x: B, L, C
-        # shape of output: B, L, C
-        # TODO: Implement the CausalSelfAttention class
+        B, L, C = x.size()  # B: batch size, L: sequence length, C: embedding size
+
+        # 计算 Q, K, V
+        Q = self.q_proj(x)  # (B, L, C)
+        K = self.k_proj(x)  # (B, L, C)
+        V = self.v_proj(x)  # (B, L, C)
+
+        # 重构为多头形式
+        Q = Q.view(B, L, self.n_head, self.head_dim).transpose(1, 2)  # (B, n_head, L, head_dim)
+        K = K.view(B, L, self.n_head, self.head_dim).transpose(1, 2)  # (B, n_head, L, head_dim)
+        V = V.view(B, L, self.n_head, self.head_dim).transpose(1, 2)  # (B, n_head, L, head_dim)
+
+        # 计算注意力得分
+        attn_scores = (Q @ K.transpose(-2, -1)) / math.sqrt(self.head_dim)  # (B, n_head, L, L)
+
+        # 应用 causal mask，屏蔽未来的信息
+        attn_scores = attn_scores.masked_fill(self.mask[:, :, :L, :L] == 0, float('-inf'))
+
+        # 归一化注意力得分
+        attn_probs = F.softmax(attn_scores, dim=-1)  # (B, n_head, L, L)
+        attn_probs = self.attn_dropout(attn_probs)  # 应用 dropout
+
+        # 计算注意力输出
+        attn_output = attn_probs @ V  # (B, n_head, L, head_dim)
+
+        # 合并多头
+        attn_output = attn_output.transpose(1, 2).contiguous().view(B, L, C)  # (B, L, C)
+
+        # 输出线性映射并应用 dropout
+        output = self.out_proj(attn_output)  # (B, L, C)
+        output = self.resid_dropout(output)
+
+        return output
 
 class MLP(nn.Module):
     def __init__(self, config):
