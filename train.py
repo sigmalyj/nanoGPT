@@ -40,7 +40,7 @@ eval_only = False    # 是否只进行评估而不训练
 always_save_checkpoint = True  # 是否始终保存检查点
 
 # 初始化方式：'scratch' 表示从头开始训练，'resume' 表示从检查点恢复
-init_from = 'scratch'
+init_from = 'resume'
 
 # 数据相关配置
 dataset = 'wikitext'  # 数据集名称
@@ -70,7 +70,7 @@ lr_decay_iters = 20000 # 学习率衰减的总步数
 min_lr = 6e-5         # 最小学习率
 
 # 系统设置
-device = 'cpu'  # 设备类型，可设置为 'cuda' 使用 GPU
+device = 'cuda'  # 设备类型，可设置为 'cuda' 使用 GPU
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16'
 compile = True  # 是否编译模型以加速训练
 
@@ -97,6 +97,7 @@ torch.backends.cudnn.allow_tf32 = True
 
 # 确定设备类型和数据类型
 device_type = 'cuda' if 'cuda' in device else 'cpu'
+print(f"Using device type: {device_type}")  # 打印设备类型
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 
 # ----------------------------- Dataset Loader ----------------------------------
@@ -254,8 +255,8 @@ while iter_num <= max_iters:
     if iter_num % log_interval == 0:
         lossf = loss.item() * gradient_accumulation_steps  # 恢复到未归一化的损失
         if local_iter_num >= 5:
-            print(f"iter {iter_num}: loss {lossf:.4f}, time {(t1 - t0)*1000:.2f}ms")
+            log_message(f"iter {iter_num}: loss {lossf:.4f}, time {(t1 - t0)*1000:.2f}ms")  # 使用 log_message 记录日志
     t0 = t1
-
+    
     iter_num += 1
     local_iter_num += 1
