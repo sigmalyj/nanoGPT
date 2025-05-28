@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 # from model import ModelConfig, GPT
-from model_RoPE import ModelConfig, GPT
+from model import ModelConfig, GPT
 
 # ----------------------------- Configuration ----------------------------------
 # 配置部分，定义了训练的超参数和系统设置
@@ -40,7 +40,7 @@ eval_only = False    # 是否只进行评估而不训练
 always_save_checkpoint = True  # 是否始终保存检查点
 
 # 初始化方式：'scratch' 表示从头开始训练，'resume' 表示从检查点恢复
-init_from = 'resume'
+init_from = 'scratch'
 
 # 数据相关配置
 dataset = 'wikitext'  # 数据集名称

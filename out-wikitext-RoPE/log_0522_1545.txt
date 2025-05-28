@@ -1,0 +1,4 @@
+tokens per iteration will be: 16,384
+Initializing a new model from scratch
+compiling the model... (takes a ~minute)
+step 0: train loss 10.9148, val loss 10.9483
